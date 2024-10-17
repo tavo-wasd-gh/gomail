@@ -48,6 +48,28 @@ func (s *Auth) Send(
 	return nil
 }
 
+func (s *Auth) Validate(user string) error {
+	auth := smtp.PlainAuth("", user, s.Pass, s.Host)
+
+	client, err := smtp.Dial(s.Host + ":" + s.Port)
+	if err != nil {
+		return fmt.Errorf("Failed to connect to SMTP server: %w", err)
+	}
+	defer client.Close()
+
+	if ok, _ := client.Extension("STARTTLS"); ok {
+		if err = client.StartTLS(nil); err != nil {
+			return fmt.Errorf("Failed to start TLS: %w", err)
+		}
+	}
+
+	if err = client.Auth(auth); err != nil {
+		return fmt.Errorf("Authentication failed: %w", err)
+	}
+
+	return nil
+}
+
 func (s *Auth) message(
 	from string,
 	to []string,
