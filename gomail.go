@@ -16,7 +16,7 @@ type Auth struct {
 	Pass string
 }
 
-func Client(host, port, password string) *Auth {
+func Client(host string, port string, password string) *Auth {
 	return &Auth{
 		Host: host,
 		Port: port,
@@ -31,19 +31,21 @@ func (s *Auth) Send(
 	body string,
 	attachments ...map[string]*bytes.Buffer,
 ) error {
-	var attachmentMap map[string]*bytes.Buffer
+	attachmentMap := make(map[string]*bytes.Buffer)
 	if len(attachments) > 0 {
 		attachmentMap = attachments[0]
-	} else {
-		attachmentMap = make(map[string]*bytes.Buffer)
 	}
 
-	message := s.message(from, to, subject, body, attachmentMap)
+	message, err := s.message(from, to, subject, body, attachmentMap)
+	if err != nil {
+		return fmt.Errorf("failed to create email message: %w", err)
+	}
+
 	auth := smtp.PlainAuth("", from, s.Pass, s.Host)
 
-	err := smtp.SendMail(s.Host+":"+s.Port, auth, from, to, message)
+	err = smtp.SendMail(s.Host+":"+s.Port, auth, from, to, message)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to send email: %w", err)
 	}
 
 	return nil
@@ -54,7 +56,7 @@ func (s *Auth) Validate(user string) error {
 
 	client, err := smtp.Dial(s.Host + ":" + s.Port)
 	if err != nil {
-		return fmt.Errorf("Failed to connect to SMTP server: %w", err)
+		return fmt.Errorf("failed to connect to SMTP server: %w", err)
 	}
 	defer client.Close()
 
@@ -64,12 +66,12 @@ func (s *Auth) Validate(user string) error {
 		}
 
 		if err = client.StartTLS(tlsConfig); err != nil {
-			return fmt.Errorf("Failed to start TLS: %w", err)
+			return fmt.Errorf("failed to start TLS: %w", err)
 		}
 	}
 
 	if err = client.Auth(auth); err != nil {
-		return fmt.Errorf("Authentication failed: %w", err)
+		return fmt.Errorf("authentication failed: %w", err)
 	}
 
 	return nil
@@ -81,37 +83,52 @@ func (s *Auth) message(
 	subject string,
 	body string,
 	attachments map[string]*bytes.Buffer,
-) []byte {
+) ([]byte, error) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	buf.WriteString("From: " + from + "\n")
-	buf.WriteString("To: " + strings.Join(to, ",") + "\n")
-	buf.WriteString("Subject: " + subject + "\n")
+	buf.WriteString(fmt.Sprintf("From: %s\n", from))
+	buf.WriteString(fmt.Sprintf("To: %s\n", strings.Join(to, ",")))
+	buf.WriteString(fmt.Sprintf("Subject: %s\n", subject))
 	buf.WriteString("MIME-Version: 1.0\n")
-	buf.WriteString("Content-Type: multipart/mixed; boundary=" + writer.Boundary() + "\n\n")
+	buf.WriteString(fmt.Sprintf("Content-Type: multipart/mixed; boundary=%s\n\n", writer.Boundary()))
 
-	s.writePart(writer, "text/plain", body)
-
-	for filename, fileBuffer := range attachments {
-		s.attachFile(writer, filename, fileBuffer)
+	if err := s.write(writer, "text/plain", body); err != nil {
+		return nil, fmt.Errorf("failed to write email body: %w", err)
 	}
 
-	writer.Close()
-	return buf.Bytes()
+	for filename, fileBuffer := range attachments {
+		if err := s.attach(writer, filename, fileBuffer); err != nil {
+			return nil, fmt.Errorf("failed to attach file %s: %w", filename, err)
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close writer: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }
 
-func (s *Auth) writePart(writer *multipart.Writer, contentType, content string) {
+func (s *Auth) write(writer *multipart.Writer, contentType, content string) error {
 	partHeader := make(textproto.MIMEHeader)
 	partHeader.Set("Content-Type", contentType)
-	part, _ := writer.CreatePart(partHeader)
-	part.Write([]byte(content))
+	part, err := writer.CreatePart(partHeader)
+	if err != nil {
+		return fmt.Errorf("failed to create part: %w", err)
+	}
+	_, err = part.Write([]byte(content))
+	return err
 }
 
-func (s *Auth) attachFile(writer *multipart.Writer, filename string, fileBuffer *bytes.Buffer) {
+func (s *Auth) attach(writer *multipart.Writer, filename string, fileBuffer *bytes.Buffer) error {
 	attachmentHeader := make(textproto.MIMEHeader)
 	attachmentHeader.Set("Content-Type", "application/octet-stream")
 	attachmentHeader.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
-	attachment, _ := writer.CreatePart(attachmentHeader)
-	attachment.Write(fileBuffer.Bytes())
+	attachment, err := writer.CreatePart(attachmentHeader)
+	if err != nil {
+		return fmt.Errorf("failed to create attachment part: %w", err)
+	}
+	_, err = attachment.Write(fileBuffer.Bytes())
+	return err
 }
