@@ -2,6 +2,7 @@ package gomail
 
 import (
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"mime/multipart"
 	"net/smtp"
@@ -58,7 +59,11 @@ func (s *Auth) Validate(user string) error {
 	defer client.Close()
 
 	if ok, _ := client.Extension("STARTTLS"); ok {
-		if err = client.StartTLS(nil); err != nil {
+		tlsConfig := &tls.Config{
+			ServerName: s.Host,
+		}
+
+		if err = client.StartTLS(tlsConfig); err != nil {
 			return fmt.Errorf("Failed to start TLS: %w", err)
 		}
 	}
