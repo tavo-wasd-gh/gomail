@@ -1,4 +1,3 @@
-// Package gomail provides simple emailing abstraction.
 package gomail
 
 import (
@@ -10,17 +9,38 @@ import (
 	"strings"
 )
 
-// Email sends an email with the specified host, port, from address, recipients,
-// subject, body, and attachments. It returns an error if the sending fails.
-func Email(
-	host, port, password string,
-	from string, to []string,
-	subject, body string,
-	attachments map[string]*bytes.Buffer,
+type Auth struct {
+	Host string
+	Port string
+	Pass string
+}
+
+func Client(host, port, password string) *Auth {
+	return &Auth{
+		Host: host,
+		Port: port,
+		Pass: password,
+	}
+}
+
+func (s *Auth) Send(
+	from string,
+	to []string,
+	subject string,
+	body string,
+	attachments ...map[string]*bytes.Buffer,
 ) error {
-	message := Message(from, to, subject, body, attachments)
-	auth := smtp.PlainAuth("", from, password, host)
-	err := smtp.SendMail(host+":"+port, auth, from, to, message)
+	var attachmentMap map[string]*bytes.Buffer
+	if len(attachments) > 0 {
+		attachmentMap = attachments[0]
+	} else {
+		attachmentMap = make(map[string]*bytes.Buffer)
+	}
+
+	message := s.message(from, to, subject, body, attachmentMap)
+	auth := smtp.PlainAuth("", from, s.Pass, s.Host)
+
+	err := smtp.SendMail(s.Host+":"+s.Port, auth, from, to, message)
 	if err != nil {
 		return err
 	}
@@ -28,43 +48,40 @@ func Email(
 	return nil
 }
 
-// Message takes parts of a message and returns the crafted message as []byte.
-func Message(
+func (s *Auth) message(
 	from string,
 	to []string,
-	subject, body string,
+	subject string,
+	body string,
 	attachments map[string]*bytes.Buffer,
 ) []byte {
 	var buf bytes.Buffer
-
 	writer := multipart.NewWriter(&buf)
 
 	buf.WriteString("From: " + from + "\n")
 	buf.WriteString("To: " + strings.Join(to, ",") + "\n")
-	buf.WriteString(subject)
+	buf.WriteString("Subject: " + subject + "\n")
 	buf.WriteString("MIME-Version: 1.0\n")
 	buf.WriteString("Content-Type: multipart/mixed; boundary=" + writer.Boundary() + "\n\n")
 
-	write(writer, "text/plain", body)
+	s.writePart(writer, "text/plain", body)
 
 	for filename, fileBuffer := range attachments {
-		attach(writer, filename, fileBuffer)
+		s.attachFile(writer, filename, fileBuffer)
 	}
 
 	writer.Close()
 	return buf.Bytes()
 }
 
-// write writes the message body or part of an email.
-func write(writer *multipart.Writer, contentType, content string) {
+func (s *Auth) writePart(writer *multipart.Writer, contentType, content string) {
 	partHeader := make(textproto.MIMEHeader)
 	partHeader.Set("Content-Type", contentType)
 	part, _ := writer.CreatePart(partHeader)
 	part.Write([]byte(content))
 }
 
-// attach adds an attachment to the email.
-func attach(writer *multipart.Writer, filename string, fileBuffer *bytes.Buffer) {
+func (s *Auth) attachFile(writer *multipart.Writer, filename string, fileBuffer *bytes.Buffer) {
 	attachmentHeader := make(textproto.MIMEHeader)
 	attachmentHeader.Set("Content-Type", "application/octet-stream")
 	attachmentHeader.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
