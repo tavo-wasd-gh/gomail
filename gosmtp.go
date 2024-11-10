@@ -1,4 +1,4 @@
-package gomail
+package smtp
 
 import (
 	"bytes"
@@ -52,9 +52,34 @@ func (s *Auth) Send(
 }
 
 func (s *Auth) Validate(user string) error {
-	auth := smtp.PlainAuth("", user, s.Pass, s.Host)
+	address := s.Host + ":" + s.Port
 
-	client, err := smtp.Dial(s.Host + ":" + s.Port)
+	if s.Port == "465" {
+		tlsConfig := &tls.Config{
+			ServerName: s.Host,
+		}
+
+		conn, err := tls.Dial("tcp", address, tlsConfig)
+		if err != nil {
+			return fmt.Errorf("failed to connect to SMTPS server: %w", err)
+		}
+		defer conn.Close()
+
+		client, err := smtp.NewClient(conn, s.Host)
+		if err != nil {
+			return fmt.Errorf("failed to create SMTPS client: %w", err)
+		}
+		defer client.Close()
+
+		auth := smtp.PlainAuth("", user, s.Pass, s.Host)
+		if err = client.Auth(auth); err != nil {
+			return fmt.Errorf("authentication failed: %w", err)
+		}
+
+		return nil
+	}
+
+	client, err := smtp.Dial(address)
 	if err != nil {
 		return fmt.Errorf("failed to connect to SMTP server: %w", err)
 	}
@@ -68,8 +93,11 @@ func (s *Auth) Validate(user string) error {
 		if err = client.StartTLS(tlsConfig); err != nil {
 			return fmt.Errorf("failed to start TLS: %w", err)
 		}
+	} else {
+		return fmt.Errorf("TLS not supported by the server, aborted")
 	}
 
+	auth := smtp.PlainAuth("", user, s.Pass, s.Host)
 	if err = client.Auth(auth); err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}

@@ -1,4 +1,4 @@
-# gomail
+# gosmtp
 
 ## Sample hello world
 
@@ -8,11 +8,11 @@ package main
 import (
     "fmt"
 
-    "github.com/tavo-wasd-gh/gomail"
+    "github.com/tavo-wasd-gh/gosmtp"
 )
 
 func main() {
-    client := gomail.Client("smtp.example.com", "587", "p4ssw0rd")
+    client := smtp.Client("smtp.example.com", "587", "p4ssw0rd")
 
     err := client.Send(
         "you@example.com",
@@ -37,11 +37,11 @@ package main
 import (
     "fmt"
 
-    "github.com/tavo-wasd-gh/gomail"
+    "github.com/tavo-wasd-gh/gosmtp"
 )
 
 func main() {
-    client := gomail.Client("smtp.example.com", "587", "p4ssw0rd")
+    client := smtp.Client("smtp.example.com", "587", "p4ssw0rd")
 
     attachments := map[string]*bytes.Buffer{
         "hello.txt": bytes.NewBuffer([]byte("This is a test file.")),
