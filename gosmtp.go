@@ -41,14 +41,70 @@ func (s *Auth) Send(
 		return fmt.Errorf("failed to create email message: %w", err)
 	}
 
-	auth := smtp.PlainAuth("", from, s.Pass, s.Host)
+	address := s.Host + ":" + s.Port
 
-	err = smtp.SendMail(s.Host+":"+s.Port, auth, from, to, message)
-	if err != nil {
-		return fmt.Errorf("failed to send email: %w", err)
+	var client *smtp.Client
+
+	if s.Port == "465" {
+		tlsConfig := &tls.Config{
+			ServerName: s.Host,
+		}
+		conn, err := tls.Dial("tcp", address, tlsConfig)
+		if err != nil {
+			return fmt.Errorf("failed to connect to SMTPS server: %w", err)
+		}
+		defer conn.Close()
+
+		client, err = smtp.NewClient(conn, s.Host)
+		if err != nil {
+			return fmt.Errorf("failed to create SMTPS client: %w", err)
+		}
+	} else {
+		client, err = smtp.Dial(address)
+		if err != nil {
+			return fmt.Errorf("failed to connect to SMTP server: %w", err)
+		}
+		defer client.Close()
+
+		if ok, _ := client.Extension("STARTTLS"); ok {
+			tlsConfig := &tls.Config{
+				ServerName: s.Host,
+			}
+			if err = client.StartTLS(tlsConfig); err != nil {
+				return fmt.Errorf("failed to start TLS: %w", err)
+			}
+		} else {
+			return fmt.Errorf("TLS not supported by the server, aborted")
+		}
 	}
 
-	return nil
+	auth := smtp.PlainAuth("", from, s.Pass, s.Host)
+	if err = client.Auth(auth); err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
+	if err = client.Mail(from); err != nil {
+		return fmt.Errorf("failed to set sender: %w", err)
+	}
+	for _, recipient := range to {
+		if err = client.Rcpt(recipient); err != nil {
+			return fmt.Errorf("failed to add recipient %s: %w", recipient, err)
+		}
+	}
+
+	w, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("failed to get data writer: %w", err)
+	}
+	_, err = w.Write(message)
+	if err != nil {
+		return fmt.Errorf("failed to write message: %w", err)
+	}
+	if err = w.Close(); err != nil {
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+
+	return client.Quit()
 }
 
 func (s *Auth) Validate(user string) error {
